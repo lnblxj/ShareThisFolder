@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,24 +19,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShareThisFolder
-          path: build/Release/ShareThisFolder.exe
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: ShareThisFolder
-
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: ShareThisFolder.exe
+          files: build/Release/ShareThisFolder.exe
           generate_release_notes: true

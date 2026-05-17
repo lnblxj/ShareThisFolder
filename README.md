@@ -50,14 +50,6 @@ The executable will be at `build/Release/ShareThisFolder.exe`.
   Press Ctrl+C to stop
 ```
 
-## How It Works
-
-- Starts a lightweight HTTP server on port 8080 (auto-fallback to a random port if occupied)
-- Detects local IP addresses automatically
-- Generates a QR code via [api.2dcode.biz](https://api.2dcode.biz) and opens it in your default image viewer
-- Serves the current directory with a responsive, mobile-friendly HTML file browser
-- Supports all file types with proper MIME type detection
-
 ## Requirements
 
 - Windows 10 / 11
