@@ -151,7 +151,7 @@ void HttpServer::handleClient(intptr_t clientSock) {
         auto rootW = rootNorm.wstring();
         bool ok = (diskW.size() >= rootW.size() &&
                    diskW.compare(0, rootW.size(), rootW) == 0 &&
-                   (diskW.size() == rootW.size() || diskW[rootW.size()] == L'\\'));
+                   (diskW.size() == rootW.size() || rootW.back() == L'\\' || diskW[rootW.size()] == L'\\'));
         if (!ok) {
             std::string body = i18n::get("file_not_found");
             std::ostringstream oss;
