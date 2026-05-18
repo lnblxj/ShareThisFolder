@@ -28,6 +28,10 @@ static const std::map<std::string, const char*> zh = {
     {"dir_label",       "[目录]"},
     {"qr_opened",       "二维码图片已在图片查看器中打开，请用手机扫描"},
     {"qr_failed",       "网络不可用，无法生成二维码图片，请手动在浏览器中打开上方链接"},
+    {"menu_hint",       "访问地址 (按下对应数字快速复制到剪贴板):"},
+    {"menu_show_qr",    "展示二维码"},
+    {"menu_quit",       "关闭共享服务"},
+    {"copied",          "已复制到剪贴板"},
 };
 
 static const std::map<std::string, const char*> en = {
@@ -51,6 +55,10 @@ static const std::map<std::string, const char*> en = {
     {"dir_label",       "[DIR]"},
     {"qr_opened",       "QR code image opened - scan with your phone"},
     {"qr_failed",       "Network unavailable - open the URL above in your phone browser"},
+    {"menu_hint",       "Access addresses (press number to copy to clipboard):"},
+    {"menu_show_qr",    "Show QR code"},
+    {"menu_quit",       "Stop sharing"},
+    {"copied",          "Copied to clipboard"},
 };
 
 void init() {

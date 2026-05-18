@@ -10,12 +10,18 @@
 #include <string>
 #include <csignal>
 #include <cstdio>
+#include <conio.h>
+#include <atomic>
+#include <thread>
+#include <vector>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "urlmon.lib")
 
 static HttpServer* g_server = nullptr;
+static std::atomic<bool> g_quit{false};
 
 static void signalHandler(int) {
+    g_quit = true;
     if (g_server) g_server->stop();
 }
 
@@ -40,6 +46,75 @@ static std::string wideToUtf8(const std::wstring& ws) {
     std::string result(len, '\0');
     WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), &result[0], len, nullptr, nullptr);
     return result;
+}
+
+static void copyToClipboard(const std::string& text) {
+    if (!OpenClipboard(nullptr)) return;
+    EmptyClipboard();
+    size_t len = text.size();
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len + 1);
+    if (!hMem) { CloseClipboard(); return; }
+    char* p = static_cast<char*>(GlobalLock(hMem));
+    memcpy(p, text.c_str(), len);
+    p[len] = '\0';
+    GlobalUnlock(hMem);
+    SetClipboardData(CF_TEXT, hMem);
+    CloseClipboard();
+}
+
+static void showQRCode(const std::string& url) {
+    std::string qrApiUrl = "https://api.2dcode.biz/v1/create-qr-code?data="
+                           + urlEncode(url) + "&size=300x300";
+    char tempDir[MAX_PATH] = {};
+    GetTempPathA(MAX_PATH, tempDir);
+    std::string qrPath = std::string(tempDir) + "stf_qrcode.png";
+
+    std::cout << "\n  " << i18n::get("scan_qr") << "\n" << std::endl;
+
+    HRESULT hr = URLDownloadToFileA(nullptr, qrApiUrl.c_str(), qrPath.c_str(), 0, nullptr);
+    if (SUCCEEDED(hr)) {
+        ShellExecuteA(nullptr, "open", qrPath.c_str(), nullptr, nullptr, SW_SHOW);
+        std::cout << "  " << i18n::get("qr_opened") << "\n" << std::endl;
+    } else {
+        std::cout << "  " << i18n::get("qr_failed") << "\n" << std::endl;
+    }
+}
+
+static void printMenu(const std::vector<std::string>& urls) {
+    std::cout << "\n  " << i18n::get("menu_hint") << "\n\n";
+    for (size_t i = 0; i < urls.size(); i++) {
+        std::cout << "  " << (i + 1) << ". " << urls[i] << "\n";
+    }
+    std::cout << "\n  s. " << i18n::get("menu_show_qr") << "\n";
+    std::cout << "  q. " << i18n::get("menu_quit") << "\n";
+    std::cout << std::endl;
+}
+
+static void menuThreadFunc(const std::vector<std::string>& urls) {
+    while (!g_quit) {
+        printMenu(urls);
+
+        while (!_kbhit() && !g_quit) {
+            Sleep(100);
+        }
+        if (g_quit) break;
+
+        int ch = _getch();
+
+        if (ch >= '1' && ch <= '9') {
+            size_t idx = static_cast<size_t>(ch - '1');
+            if (idx < urls.size()) {
+                copyToClipboard(urls[idx]);
+                std::cout << "\n  " << i18n::get("copied") << "\n";
+            }
+        } else if (ch == 's' || ch == 'S') {
+            showQRCode(urls[0]);
+        } else if (ch == 'q' || ch == 'Q') {
+            g_quit = true;
+            if (g_server) g_server->stop();
+            break;
+        }
+    }
 }
 
 int main() {
@@ -76,46 +151,22 @@ int main() {
     }
 
     port = server.getPort();
-    std::string url = "http://" + ips[0] + ":" + std::to_string(port) + "/";
 
-    // Print server info
+    std::vector<std::string> urls;
+    for (auto& ip : ips) {
+        urls.push_back("http://" + ip + ":" + std::to_string(port) + "/");
+    }
+
     std::cout << "\n"
               << "  " << i18n::get("title") << "\n"
               << "  ------------------------------------------------\n\n"
-              << "  " << i18n::get("sharing_dir") << rootDirUtf8 << "\n\n"
-              << "  " << i18n::get("open_url") << url << "\n\n";
-
-    if (ips.size() > 1) {
-        for (size_t i = 1; i < ips.size(); i++)
-            std::cout << "             http://" << ips[i] << ":" << port << "/\n";
-        std::cout << "\n";
-    }
-
-    // Download QR code image via API and open it
-    std::string qrApiUrl = "https://api.2dcode.biz/v1/create-qr-code?data="
-                           + urlEncode(url) + "&size=300x300";
-    char tempDir[MAX_PATH] = {};
-    GetTempPathA(MAX_PATH, tempDir);
-    std::string qrPath = std::string(tempDir) + "stf_qrcode.png";
-
-    std::cout << "  " << i18n::get("scan_qr") << "\n" << std::endl;
-
-    HRESULT hr = URLDownloadToFileA(nullptr, qrApiUrl.c_str(), qrPath.c_str(), 0, nullptr);
-    if (SUCCEEDED(hr)) {
-        ShellExecuteA(nullptr, "open", qrPath.c_str(), nullptr, nullptr, SW_SHOW);
-        std::cout << "  " << i18n::get("qr_opened") << "\n\n";
-    } else {
-        std::cout << "  " << i18n::get("qr_failed") << "\n\n";
-    }
-
-    std::cout << "  " << i18n::get("press_ctrl_c") << std::endl;
+              << "  " << i18n::get("sharing_dir") << rootDirUtf8 << "\n";
 
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    while (true) {
-        Sleep(1000);
-    }
+    std::thread menuThread(menuThreadFunc, std::cref(urls));
+    menuThread.join();
 
     WSACleanup();
     return 0;
