@@ -21,7 +21,10 @@
             "name": "Visual Studio Community 2022 Release - amd64-debug",
             "displayName": "Visual Studio Community 2022 Release - amd64 - Debug",
             "configurePreset": "Visual Studio Community 2022 Release - amd64",
-            "configuration": "Debug"
+            "configuration": "Debug",
+            "targets": [
+                "ShareThisFolder"
+            ]
         }
     ]
 }
