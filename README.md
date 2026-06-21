@@ -27,6 +27,21 @@ cmake --build build --config Release
 
 The executable will be at `build/Release/ShareThisFolder.exe`.
 
+## Project Layout
+
+```text
+include/share_this_folder/
+  http/   Public HTTP file server interfaces
+  net/    Local network discovery, UPnP, and STUN tunnel interfaces
+  util/   Shared utility interfaces such as i18n
+src/
+  app/    Application entry point and console workflow
+  http/   HTTP file server implementation
+  net/    Network discovery, UPnP, and STUN tunnel implementation
+  util/   Shared utility implementation
+docs/     Design and protocol notes
+```
+
 ### Usage
 
 1. Place `ShareThisFolder.exe` in the folder you want to share

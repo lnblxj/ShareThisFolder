@@ -5,16 +5,25 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(ShareThisFolder
-    src/main.cpp
-    src/server.cpp
-    src/i18n.cpp
-    src/network.cpp
+    src/app/main.cpp
+    src/http/server.cpp
+    src/net/network.cpp
+    src/net/stun_client.cpp
+    src/net/upnp_client.cpp
+    src/util/i18n.cpp
+    include/share_this_folder/http/server.h
+    include/share_this_folder/net/network.h
+    include/share_this_folder/net/stun_client.h
+    include/share_this_folder/net/upnp_client.h
+    include/share_this_folder/util/i18n.h
 )
 
 target_include_directories(ShareThisFolder PRIVATE include)
 
-target_compile_options(ShareThisFolder PRIVATE /utf-8)
+if(MSVC)
+    target_compile_options(ShareThisFolder PRIVATE /utf-8)
+endif()
 
 if(WIN32)
-    target_link_libraries(ShareThisFolder PRIVATE ws2_32)
+    target_link_libraries(ShareThisFolder PRIVATE ws2_32 urlmon)
 endif()

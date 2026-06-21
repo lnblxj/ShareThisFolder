@@ -1,5 +1,5 @@
-#include "server.h"
-#include "i18n.h"
+#include "share_this_folder/http/server.h"
+#include "share_this_folder/util/i18n.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -47,8 +47,8 @@ static std::string urlEncodeUtf8(const std::string& utf8) {
     return result;
 }
 
-HttpServer::HttpServer(const fs::path& rootDir, int port)
-    : rootDir_(rootDir), port_(port), listenSock_(INVALID_SOCKET), running_(false) {}
+HttpServer::HttpServer(const fs::path& rootDir, int port, const std::string& bindAddr)
+    : rootDir_(rootDir), bindAddr_(bindAddr), port_(port), listenSock_(INVALID_SOCKET), running_(false) {}
 
 HttpServer::~HttpServer() { stop(); }
 
@@ -63,7 +63,7 @@ bool HttpServer::start() {
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<u_short>(port_));
-    addr.sin_addr.s_addr = INADDR_ANY;
+    inet_pton(AF_INET, bindAddr_.c_str(), &addr.sin_addr);
 
     if (bind(static_cast<SOCKET>(listenSock_),
              reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {

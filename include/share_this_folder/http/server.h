@@ -6,7 +6,7 @@
 
 class HttpServer {
 public:
-    HttpServer(const std::filesystem::path& rootDir, int port);
+    HttpServer(const std::filesystem::path& rootDir, int port, const std::string& bindAddr = "0.0.0.0");
     ~HttpServer();
 
     bool start();
@@ -23,6 +23,7 @@ private:
     std::string formatSize(uint64_t bytes);
 
     std::filesystem::path rootDir_;
+    std::string  bindAddr_;
     int         port_;
     intptr_t    listenSock_;
     std::atomic<bool> running_;
