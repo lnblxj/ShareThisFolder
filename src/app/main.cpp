@@ -1,3 +1,6 @@
+#include "share_this_folder/app/console.h"
+#include "share_this_folder/app/quick_launch.h"
+#include "share_this_folder/app/settings_menu.h"
 #include "share_this_folder/http/server.h"
 #include "share_this_folder/net/network.h"
 #include "share_this_folder/net/stun_client.h"
@@ -16,18 +19,12 @@
 #include <thread>
 #include <vector>
 #include <sstream>
-#include <cwchar>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "urlmon.lib")
 
 static HttpServer* g_server = nullptr;
 static std::atomic<bool> g_quit{false};
 static uint16_t g_upnpMappedPort = 0;
-static const wchar_t* QUICK_LAUNCH_ARG = L"--stf-quick-launch-admin";
-static const wchar_t* QUICK_LAUNCH_INSTALL = L"install";
-static const wchar_t* QUICK_LAUNCH_REMOVE = L"remove";
-static const wchar_t* QUICK_LAUNCH_DIR = L"C:\\Program Files\\ShareThisFolder";
-static const wchar_t* QUICK_LAUNCH_EXE = L"C:\\Program Files\\ShareThisFolder\\stf.exe";
 
 struct AddressEntry {
     std::string kind;
@@ -62,11 +59,6 @@ static std::string urlEncode(const std::string& s) {
     return result;
 }
 
-static void waitForAnyKey() {
-    std::cout << "\n  " << i18n::get("press_any_key") << std::endl;
-    _getch();
-}
-
 static void copyToClipboard(const std::string& text) {
     if (!OpenClipboard(nullptr)) return;
     EmptyClipboard();
@@ -88,22 +80,6 @@ static void showQRCode(const std::string& url) {
         ShellExecuteA(nullptr, "open", qrPath.c_str(), nullptr, nullptr, SW_SHOW);
 }
 
-static void clearConsole() {
-    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (out == INVALID_HANDLE_VALUE) return;
-
-    CONSOLE_SCREEN_BUFFER_INFO csbi = {};
-    if (!GetConsoleScreenBufferInfo(out, &csbi)) return;
-
-    DWORD cellCount = static_cast<DWORD>(csbi.dwSize.X) * csbi.dwSize.Y;
-    DWORD written = 0;
-    COORD home = {0, 0};
-
-    FillConsoleOutputCharacterA(out, ' ', cellCount, home, &written);
-    FillConsoleOutputAttribute(out, csbi.wAttributes, cellCount, home, &written);
-    SetConsoleCursorPosition(out, home);
-}
-
 static void printAddressList(const std::vector<AddressEntry>& addresses) {
     for (size_t i = 0; i < addresses.size(); i++)
         std::cout << "  " << (i + 1) << ". " << addresses[i].kind << " "
@@ -111,7 +87,7 @@ static void printAddressList(const std::vector<AddressEntry>& addresses) {
 }
 
 static void renderMainMenu(const std::string& rootDir, const std::vector<AddressEntry>& addresses) {
-    clearConsole();
+    console_ui::clear();
     std::cout << "\n  " << i18n::get("title") << "\n"
               << "  ------------------------------------------------\n\n"
               << "  " << i18n::get("sharing_dir") << rootDir << "\n\n";
@@ -127,22 +103,8 @@ static void renderMainMenu(const std::string& rootDir, const std::vector<Address
               << std::endl;
 }
 
-static void renderSettingsMenu(bool showInvalid) {
-    clearConsole();
-    std::cout << "\n  " << i18n::get("settings_title") << "\n"
-              << "  ------------------------------------------------\n\n"
-              << "  1. " << i18n::get("settings_install_quick_launch") << "\n"
-              << "  2. " << i18n::get("settings_remove_quick_launch") << "\n"
-              << "  q. " << i18n::get("settings_back") << "\n\n"
-              << "  ------------------------------------------------\n"
-              << "  " << i18n::get("settings_prompt") << "\n";
-    if (showInvalid)
-        std::cout << "  " << i18n::get("settings_invalid") << "\n";
-    std::cout << std::endl;
-}
-
 static void renderQrMenu(const std::vector<AddressEntry>& addresses, bool showInvalid) {
-    clearConsole();
+    console_ui::clear();
     std::cout << "\n  " << i18n::get("qr_menu_title") << "\n"
               << "  ------------------------------------------------\n\n";
 
@@ -174,237 +136,6 @@ static int promptAddressIndexForQrCode(const std::vector<AddressEntry>& addresse
     }
 
     return -1;
-}
-
-static bool getCurrentExePath(wchar_t* path, DWORD size) {
-    DWORD len = GetModuleFileNameW(nullptr, path, size);
-    return len > 0 && len < size;
-}
-
-static bool readMachinePath(std::wstring& value) {
-    HKEY key = nullptr;
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-                            0, KEY_READ, &key);
-    if (rc != ERROR_SUCCESS) return false;
-
-    DWORD type = 0, bytes = 0;
-    rc = RegQueryValueExW(key, L"Path", nullptr, &type, nullptr, &bytes);
-    if (rc != ERROR_SUCCESS || (type != REG_EXPAND_SZ && type != REG_SZ)) {
-        RegCloseKey(key);
-        return false;
-    }
-
-    std::wstring buffer(bytes / sizeof(wchar_t), L'\0');
-    rc = RegQueryValueExW(key, L"Path", nullptr, &type,
-                          reinterpret_cast<LPBYTE>(&buffer[0]), &bytes);
-    RegCloseKey(key);
-    if (rc != ERROR_SUCCESS) return false;
-
-    while (!buffer.empty() && buffer.back() == L'\0') buffer.pop_back();
-    value = buffer;
-    return true;
-}
-
-static bool writeMachinePath(const std::wstring& value) {
-    HKEY key = nullptr;
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                            L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-                            0, KEY_SET_VALUE, &key);
-    if (rc != ERROR_SUCCESS) return false;
-
-    DWORD bytes = static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
-    rc = RegSetValueExW(key, L"Path", 0, REG_EXPAND_SZ,
-                        reinterpret_cast<const BYTE*>(value.c_str()), bytes);
-    RegCloseKey(key);
-    if (rc != ERROR_SUCCESS) return false;
-
-    SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0,
-                        reinterpret_cast<LPARAM>(L"Environment"),
-                        SMTO_ABORTIFHUNG, 5000, nullptr);
-    return true;
-}
-
-static std::wstring trimPathSegment(std::wstring s) {
-    while (!s.empty() && (s.front() == L' ' || s.front() == L'\t' || s.front() == L'"'))
-        s.erase(s.begin());
-    while (!s.empty() && (s.back() == L' ' || s.back() == L'\t' || s.back() == L'"' || s.back() == L'\\'))
-        s.pop_back();
-    return s;
-}
-
-static bool pathContainsDir(const std::wstring& pathValue, const std::wstring& dir) {
-    std::wstring wanted = trimPathSegment(dir);
-    size_t start = 0;
-    while (start <= pathValue.size()) {
-        size_t end = pathValue.find(L';', start);
-        std::wstring part = pathValue.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
-        if (_wcsicmp(trimPathSegment(part).c_str(), wanted.c_str()) == 0)
-            return true;
-        if (end == std::wstring::npos) break;
-        start = end + 1;
-    }
-    return false;
-}
-
-static std::wstring removeDirFromPath(const std::wstring& pathValue, const std::wstring& dir) {
-    std::wstring wanted = trimPathSegment(dir);
-    std::wstring result;
-    size_t start = 0;
-    while (start <= pathValue.size()) {
-        size_t end = pathValue.find(L';', start);
-        std::wstring part = pathValue.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
-        if (!part.empty() && _wcsicmp(trimPathSegment(part).c_str(), wanted.c_str()) != 0) {
-            if (!result.empty()) result += L";";
-            result += part;
-        }
-        if (end == std::wstring::npos) break;
-        start = end + 1;
-    }
-    return result;
-}
-
-static bool installQuickLaunchElevated(std::string& message) {
-    wchar_t currentExe[MAX_PATH] = {};
-    if (!getCurrentExePath(currentExe, MAX_PATH)) {
-        message = i18n::get("quick_launch_error_current_exe");
-        return false;
-    }
-
-    if (!CreateDirectoryW(QUICK_LAUNCH_DIR, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
-        message = i18n::get("quick_launch_error_create_dir");
-        return false;
-    }
-
-    if (!CopyFileW(currentExe, QUICK_LAUNCH_EXE, FALSE)) {
-        message = i18n::get("quick_launch_error_copy");
-        return false;
-    }
-
-    std::wstring pathValue;
-    if (!readMachinePath(pathValue)) {
-        message = i18n::get("quick_launch_error_path_read");
-        return false;
-    }
-
-    if (!pathContainsDir(pathValue, QUICK_LAUNCH_DIR)) {
-        if (!pathValue.empty() && pathValue.back() != L';') pathValue += L";";
-        pathValue += QUICK_LAUNCH_DIR;
-        if (!writeMachinePath(pathValue)) {
-            message = i18n::get("quick_launch_error_path_write");
-            return false;
-        }
-    }
-
-    message = std::string(i18n::get("quick_launch_installed")) + " stf";
-    return true;
-}
-
-static bool removeQuickLaunchElevated(std::string& message) {
-    std::wstring pathValue;
-    if (!readMachinePath(pathValue)) {
-        message = i18n::get("quick_launch_error_path_read");
-        return false;
-    }
-
-    std::wstring newPath = removeDirFromPath(pathValue, QUICK_LAUNCH_DIR);
-    if (newPath != pathValue && !writeMachinePath(newPath)) {
-        message = i18n::get("quick_launch_error_path_write");
-        return false;
-    }
-
-    DWORD attrs = GetFileAttributesW(QUICK_LAUNCH_EXE);
-    if (attrs != INVALID_FILE_ATTRIBUTES && !DeleteFileW(QUICK_LAUNCH_EXE)) {
-        message = i18n::get("quick_launch_error_delete");
-        return false;
-    }
-
-    RemoveDirectoryW(QUICK_LAUNCH_DIR);
-    message = i18n::get("quick_launch_removed");
-    return true;
-}
-
-static int runQuickLaunchAdminCommand(const wchar_t* action) {
-    SetConsoleOutputCP(65001);
-    i18n::init();
-    std::string message;
-    bool ok = false;
-    if (wcscmp(action, QUICK_LAUNCH_INSTALL) == 0)
-        ok = installQuickLaunchElevated(message);
-    else if (wcscmp(action, QUICK_LAUNCH_REMOVE) == 0)
-        ok = removeQuickLaunchElevated(message);
-    else
-        message = "Invalid quick launch action";
-
-    std::cout << "\n  " << message << "\n";
-    return ok ? 0 : 1;
-}
-
-static bool runElevatedQuickLaunchAction(const wchar_t* action) {
-    wchar_t exePath[MAX_PATH] = {};
-    if (!getCurrentExePath(exePath, MAX_PATH)) return false;
-
-    std::wstring params = L"\"";
-    params += QUICK_LAUNCH_ARG;
-    params += L"\" \"";
-    params += action;
-    params += L"\"";
-
-    SHELLEXECUTEINFOW sei = {};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"runas";
-    sei.lpFile = exePath;
-    sei.lpParameters = params.c_str();
-    sei.nShow = SW_SHOWNORMAL;
-
-    if (!ShellExecuteExW(&sei)) return false;
-    WaitForSingleObject(sei.hProcess, INFINITE);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(sei.hProcess, &exitCode);
-    CloseHandle(sei.hProcess);
-    return exitCode == 0;
-}
-
-static void showQuickLaunchResult(bool install, bool ok) {
-    clearConsole();
-    std::cout << "\n  " << i18n::get("settings_title") << "\n"
-              << "  ------------------------------------------------\n\n";
-
-    if (ok) {
-        if (install) {
-            std::cout << "  " << i18n::get("quick_launch_installed") << "\n\n"
-                      << "  " << i18n::get("quick_launch_usage") << "\n"
-                      << "  stf\n";
-        } else {
-            std::cout << "  " << i18n::get("quick_launch_removed") << "\n";
-        }
-    } else {
-        std::cout << "  " << i18n::get("quick_launch_failed") << "\n";
-    }
-
-    waitForAnyKey();
-}
-
-static void promptSettingsMenu() {
-    bool showInvalid = false;
-    while (!g_quit) {
-        renderSettingsMenu(showInvalid);
-        int ch = _getch();
-        if (ch == 'q' || ch == 'Q') return;
-
-        if (ch == '1') {
-            bool ok = runElevatedQuickLaunchAction(QUICK_LAUNCH_INSTALL);
-            showQuickLaunchResult(true, ok);
-            showInvalid = false;
-        } else if (ch == '2') {
-            bool ok = runElevatedQuickLaunchAction(QUICK_LAUNCH_REMOVE);
-            showQuickLaunchResult(false, ok);
-            showInvalid = false;
-        } else {
-            showInvalid = true;
-        }
-    }
 }
 
 static bool isPrivateOrSpecialIPv4(const std::string& ip) {
@@ -449,8 +180,8 @@ static std::string discoverPublicUrl(uint16_t port, const std::string& localIp) 
 }
 
 int wmain(int argc, wchar_t* argv[]) {
-    if (argc >= 3 && wcscmp(argv[1], QUICK_LAUNCH_ARG) == 0)
-        return runQuickLaunchAdminCommand(argv[2]);
+    if (quick_launch::isAdminCommand(argc, argv))
+        return quick_launch::runAdminCommand(argc, argv);
 
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 1;
@@ -508,7 +239,7 @@ int wmain(int argc, wchar_t* argv[]) {
             if (idx >= 0) showQRCode(addresses[static_cast<size_t>(idx)].url);
             renderMainMenu(rootDirUtf8, addresses);
         } else if (ch == 'e' || ch == 'E') {
-            promptSettingsMenu();
+            promptSettingsMenu(g_quit);
             renderMainMenu(rootDirUtf8, addresses);
         } else if (ch == 'w' || ch == 'W') {
             if (!publicUrl.empty()) {
