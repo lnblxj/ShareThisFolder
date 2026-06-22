@@ -1,5 +1,7 @@
 # ShareThisFolder
 
+<img src="https://img.sboxm.top/2026/06/ed0252d36803ecd53c01f45cec61cfb3.webp" alt="ShareThisFolder" width="720" />
+
 ShareThisFolder is a lightweight Windows folder sharing tool that quickly shares the current folder with phones and other devices.
 
 ## New Features
