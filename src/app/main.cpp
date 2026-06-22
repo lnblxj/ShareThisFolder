@@ -23,6 +23,11 @@ static HttpServer* g_server = nullptr;
 static std::atomic<bool> g_quit{false};
 static uint16_t g_upnpMappedPort = 0;
 
+struct AddressEntry {
+    std::string kind;
+    std::string url;
+};
+
 static void signalHandler(int) {
     g_quit = true;
     if (g_server) g_server->stop();
@@ -70,6 +75,78 @@ static void showQRCode(const std::string& url) {
     std::string qrPath = std::string(tempDir) + "stf_qrcode.png";
     if (SUCCEEDED(URLDownloadToFileA(nullptr, qrUrl.c_str(), qrPath.c_str(), 0, nullptr)))
         ShellExecuteA(nullptr, "open", qrPath.c_str(), nullptr, nullptr, SW_SHOW);
+}
+
+static void clearConsole() {
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out == INVALID_HANDLE_VALUE) return;
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi = {};
+    if (!GetConsoleScreenBufferInfo(out, &csbi)) return;
+
+    DWORD cellCount = static_cast<DWORD>(csbi.dwSize.X) * csbi.dwSize.Y;
+    DWORD written = 0;
+    COORD home = {0, 0};
+
+    FillConsoleOutputCharacterA(out, ' ', cellCount, home, &written);
+    FillConsoleOutputAttribute(out, csbi.wAttributes, cellCount, home, &written);
+    SetConsoleCursorPosition(out, home);
+}
+
+static void printAddressList(const std::vector<AddressEntry>& addresses) {
+    for (size_t i = 0; i < addresses.size(); i++)
+        std::cout << "  " << (i + 1) << ". " << addresses[i].kind << " "
+                  << addresses[i].url << "\n";
+}
+
+static void renderMainMenu(const std::string& rootDir, const std::vector<AddressEntry>& addresses) {
+    clearConsole();
+    std::cout << "\n  " << i18n::get("title") << "\n"
+              << "  ------------------------------------------------\n\n"
+              << "  " << i18n::get("sharing_dir") << rootDir << "\n\n";
+
+    printAddressList(addresses);
+
+    std::cout << "\n  ------------------------------------------------\n"
+              << "  1-" << addresses.size() << ". " << i18n::get("menu_hint") << "\n"
+              << "  s. " << i18n::get("menu_show_qr") << "\n"
+              << "  q. " << i18n::get("menu_quit") << "\n"
+              << std::endl;
+}
+
+static void renderQrMenu(const std::vector<AddressEntry>& addresses, bool showInvalid) {
+    clearConsole();
+    std::cout << "\n  " << i18n::get("qr_menu_title") << "\n"
+              << "  ------------------------------------------------\n\n";
+
+    printAddressList(addresses);
+
+    std::cout << "\n  ------------------------------------------------\n"
+              << "  " << i18n::get("qr_prompt") << "\n";
+    if (showInvalid)
+        std::cout << "  " << i18n::get("qr_invalid") << "\n";
+    std::cout << std::endl;
+}
+
+static int promptAddressIndexForQrCode(const std::vector<AddressEntry>& addresses) {
+    if (addresses.empty()) return -1;
+
+    bool showInvalid = false;
+    while (!g_quit) {
+        renderQrMenu(addresses, showInvalid);
+        int ch = _getch();
+        if (ch == 'q' || ch == 'Q') return -1;
+
+        if (ch >= '1' && ch <= '9') {
+            size_t idx = static_cast<size_t>(ch - '1');
+            if (idx < addresses.size())
+                return static_cast<int>(idx);
+        }
+
+        showInvalid = true;
+    }
+
+    return -1;
 }
 
 static bool isPrivateOrSpecialIPv4(const std::string& ip) {
@@ -144,25 +221,15 @@ int main() {
 
     std::string publicUrl = discoverPublicUrl(port, localIp);
 
-    std::vector<std::string> urls;
+    std::vector<AddressEntry> addresses;
     for (auto& ip : ips)
-        urls.push_back("http://" + ip + ":" + std::to_string(port) + "/");
-
-    std::cout << "\n  " << i18n::get("title") << "\n"
-              << "  ------------------------------------------------\n\n"
-              << "  " << i18n::get("sharing_dir") << wideToUtf8(wcwd) << "\n\n";
-
-    for (size_t i = 0; i < urls.size(); i++)
-        std::cout << "  LAN " << (i + 1) << ". " << urls[i] << "\n";
+        addresses.push_back({"LAN", "http://" + ip + ":" + std::to_string(port) + "/"});
 
     if (!publicUrl.empty())
-        std::cout << "  WAN    " << publicUrl << "\n";
+        addresses.push_back({"WAN", publicUrl});
 
-    std::cout << "\n  ------------------------------------------------\n"
-              << "  1-" << urls.size() << ". " << i18n::get("menu_hint") << "\n"
-              << "  s. " << i18n::get("menu_show_qr") << "\n"
-              << "  q. " << i18n::get("menu_quit") << "\n"
-              << std::endl;
+    std::string rootDirUtf8 = wideToUtf8(wcwd);
+    renderMainMenu(rootDirUtf8, addresses);
 
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
@@ -174,12 +241,14 @@ int main() {
         int ch = _getch();
         if (ch >= '1' && ch <= '9') {
             size_t idx = static_cast<size_t>(ch - '1');
-            if (idx < urls.size()) {
-                copyToClipboard(urls[idx]);
+            if (idx < addresses.size()) {
+                copyToClipboard(addresses[idx].url);
                 std::cout << "  " << i18n::get("copied") << "\n";
             }
         } else if (ch == 's' || ch == 'S') {
-            showQRCode(publicUrl.empty() ? urls[0] : publicUrl);
+            int idx = promptAddressIndexForQrCode(addresses);
+            if (idx >= 0) showQRCode(addresses[static_cast<size_t>(idx)].url);
+            renderMainMenu(rootDirUtf8, addresses);
         } else if (ch == 'q' || ch == 'Q') {
             g_quit = true;
             g_server->stop();
