@@ -109,6 +109,7 @@ static void renderMainMenu(const std::string& rootDir, const std::vector<Address
 
     std::cout << "\n  ------------------------------------------------\n"
               << "  1-" << addresses.size() << ". " << i18n::get("menu_hint") << "\n"
+              << "  w. " << i18n::get("menu_enable_public") << "\n"
               << "  s. " << i18n::get("menu_show_qr") << "\n"
               << "  q. " << i18n::get("menu_quit") << "\n"
               << std::endl;
@@ -219,14 +220,11 @@ int main() {
         return 1;
     }
 
-    std::string publicUrl = discoverPublicUrl(port, localIp);
+    std::string publicUrl;
 
     std::vector<AddressEntry> addresses;
     for (auto& ip : ips)
         addresses.push_back({"LAN", "http://" + ip + ":" + std::to_string(port) + "/"});
-
-    if (!publicUrl.empty())
-        addresses.push_back({"WAN", publicUrl});
 
     std::string rootDirUtf8 = wideToUtf8(wcwd);
     renderMainMenu(rootDirUtf8, addresses);
@@ -249,6 +247,22 @@ int main() {
             int idx = promptAddressIndexForQrCode(addresses);
             if (idx >= 0) showQRCode(addresses[static_cast<size_t>(idx)].url);
             renderMainMenu(rootDirUtf8, addresses);
+        } else if (ch == 'w' || ch == 'W') {
+            if (!publicUrl.empty()) {
+                std::cout << "  " << i18n::get("public_already_enabled") << " " << publicUrl << "\n";
+                continue;
+            }
+
+            std::cout << "  " << i18n::get("public_starting") << "\n";
+            publicUrl = discoverPublicUrl(port, localIp);
+            if (!publicUrl.empty()) {
+                addresses.push_back({"WAN", publicUrl});
+                renderMainMenu(rootDirUtf8, addresses);
+                std::cout << "  " << i18n::get("public_enabled") << " " << publicUrl << "\n";
+            } else {
+                renderMainMenu(rootDirUtf8, addresses);
+                std::cout << "  " << i18n::get("public_failed") << "\n";
+            }
         } else if (ch == 'q' || ch == 'Q') {
             g_quit = true;
             g_server->stop();
