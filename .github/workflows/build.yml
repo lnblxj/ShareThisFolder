@@ -19,10 +19,43 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Sign update artifact
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Missing repository secret: TAURI_SIGNING_PRIVATE_KEY"
+          }
+
+          $exePath = "build\Release\ShareThisFolder.exe"
+          $keyPath = Join-Path $env:RUNNER_TEMP "tauri-signing.key"
+          $password = if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+            ""
+          } else {
+            $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          }
+
+          Set-Content -Path $keyPath -Value $env:TAURI_SIGNING_PRIVATE_KEY -NoNewline
+
+          npx.cmd --yes @tauri-apps/cli@2.11.3 signer sign `
+            --private-key-path $keyPath `
+            --password "$password" `
+            $exePath
+
+          if (-not (Test-Path "$exePath.sig")) {
+            throw "Signature file was not generated: $exePath.sig"
+          }
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: build/Release/ShareThisFolder.exe
+          files: |
+            build/Release/ShareThisFolder.exe
+            build/Release/ShareThisFolder.exe.sig
           generate_release_notes: true

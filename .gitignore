@@ -28,3 +28,6 @@ Makefile
 .vscode/
 *.swp
 *~
+
+# Local signing keys
+.tauri/
