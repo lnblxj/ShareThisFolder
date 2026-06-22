@@ -31,6 +31,7 @@ jobs:
             throw "Missing repository secret: TAURI_SIGNING_PRIVATE_KEY"
           }
 
+          $privateKey = $env:TAURI_SIGNING_PRIVATE_KEY
           $exePath = "build\Release\ShareThisFolder.exe"
           $keyPath = Join-Path $env:RUNNER_TEMP "tauri-signing.key"
           $password = if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
@@ -39,7 +40,12 @@ jobs:
             $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           }
 
-          Set-Content -Path $keyPath -Value $env:TAURI_SIGNING_PRIVATE_KEY -NoNewline
+          Set-Content -Path $keyPath -Value $privateKey -NoNewline
+
+          # The Tauri CLI also reads these env vars automatically. Clear them so
+          # --private-key-path is the only key source passed to the signer.
+          Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+          Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 
           npx.cmd --yes @tauri-apps/cli@2.11.3 signer sign `
             --private-key-path $keyPath `
