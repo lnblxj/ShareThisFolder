@@ -1,4 +1,5 @@
 #include "share_this_folder/net/stun_client.h"
+#include "share_this_folder/net/upnp_client.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <cstdint>
@@ -15,6 +16,7 @@ static std::atomic<bool> g_active{false};
 static SOCKET g_keepSock = INVALID_SOCKET;
 static SOCKET g_fwdListenSock = INVALID_SOCKET;
 static uint16_t g_targetPort = 0;
+static uint16_t g_upnpTunnelPort = 0;
 
 static uint16_t readU16BE(const uint8_t* p) {
     return static_cast<uint16_t>((p[0] << 8) | p[1]);
@@ -58,9 +60,58 @@ static bool resolve(const std::string& h, uint16_t p, sockaddr_in& a) {
     freeaddrinfo(r);return true;
 }
 
-static SOCKET tcpConnect(const std::string& h, uint16_t p) {
+static std::string localAddressForRemote(const std::string& h, uint16_t p) {
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return "";
+    sockaddr_in ra = {};
+    if (!resolve(h, p, ra)) { closesocket(s); return ""; }
+    connect(s, (sockaddr*)&ra, sizeof(ra));
+    sockaddr_in la = {}; int ll = sizeof(la);
+    std::string result;
+    if (getsockname(s, (sockaddr*)&la, &ll) == 0) {
+        char ip[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &la.sin_addr, ip, sizeof(ip));
+        result = ip;
+    }
+    closesocket(s);
+    return result;
+}
+
+static uint16_t reserveLocalTcpPort(const std::string& localIp) {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return 0;
+    int reuse = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+
+    sockaddr_in la = {};
+    la.sin_family = AF_INET;
+    la.sin_port = 0;
+    inet_pton(AF_INET, localIp.c_str(), &la.sin_addr);
+    if (bind(s, (sockaddr*)&la, sizeof(la)) != 0) {
+        closesocket(s);
+        return 0;
+    }
+
+    int ll = sizeof(la);
+    uint16_t port = 0;
+    if (getsockname(s, (sockaddr*)&la, &ll) == 0)
+        port = ntohs(la.sin_port);
+    closesocket(s);
+    return port;
+}
+
+static SOCKET tcpConnect(const std::string& h, uint16_t p, const std::string& localIp = "", uint16_t localPort = 0) {
     SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     if(s==INVALID_SOCKET)return INVALID_SOCKET;
+    int reuse = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    if (localPort != 0 && !localIp.empty()) {
+        sockaddr_in la = {};
+        la.sin_family = AF_INET;
+        la.sin_port = htons(localPort);
+        inet_pton(AF_INET, localIp.c_str(), &la.sin_addr);
+        if (bind(s, (sockaddr*)&la, sizeof(la)) != 0) { closesocket(s); return INVALID_SOCKET; }
+    }
     sockaddr_in ra={};
     if(!resolve(h,p,ra)){closesocket(s);return INVALID_SOCKET;}
     u_long nb=1;ioctlsocket(s,FIONBIO,&nb);
@@ -187,7 +238,20 @@ bool tunnelStart(const std::string& httpHost, uint16_t httpPort,
     g_targetPort = bindPort;
 
     // Step 1: TCP keep-alive connection (creates NAT mapping)
-    g_keepSock = tcpConnect(httpHost, httpPort);
+    std::string plannedLocalIp = bindAddr != "0.0.0.0" ? bindAddr : localAddressForRemote(httpHost, httpPort);
+    uint16_t plannedTunnelPort = plannedLocalIp.empty() ? 0 : reserveLocalTcpPort(plannedLocalIp);
+    if (plannedTunnelPort != 0 &&
+        upnpAddPortMapping(plannedTunnelPort, plannedTunnelPort, plannedLocalIp, "ShareThisFolderTunnel")) {
+        g_upnpTunnelPort = plannedTunnelPort;
+        g_keepSock = tcpConnect(httpHost, httpPort, plannedLocalIp, plannedTunnelPort);
+        if (g_keepSock == INVALID_SOCKET) {
+            upnpRemovePortMapping(g_upnpTunnelPort);
+            g_upnpTunnelPort = 0;
+        }
+    }
+
+    if (g_keepSock == INVALID_SOCKET)
+        g_keepSock = tcpConnect(httpHost, httpPort);
     if (g_keepSock == INVALID_SOCKET) {
         std::cerr << "  [Tunnel] Cannot connect to " << httpHost << ":" << httpPort << std::endl;
         return false;
@@ -199,6 +263,11 @@ bool tunnelStart(const std::string& httpHost, uint16_t httpPort,
     char localIpStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &la.sin_addr, localIpStr, sizeof(localIpStr));
     std::string localIp(localIpStr);
+
+    // In double-NAT/CGNAT setups, STUN gives the ISP NAT public endpoint.
+    // UPnP is only used to open the first-hop router port back to this host.
+    if (g_upnpTunnelPort == 0 && upnpAddPortMapping(tunnelPort, tunnelPort, localIp, "ShareThisFolderTunnel"))
+        g_upnpTunnelPort = tunnelPort;
 
     // Step 2: STUN discovery from same port
     // Try TCP STUN
@@ -265,4 +334,5 @@ void tunnelStop() {
     g_active = false;
     if (g_keepSock != INVALID_SOCKET) { closesocket(g_keepSock); g_keepSock = INVALID_SOCKET; }
     if (g_fwdListenSock != INVALID_SOCKET) { closesocket(g_fwdListenSock); g_fwdListenSock = INVALID_SOCKET; }
+    if (g_upnpTunnelPort != 0) { upnpRemovePortMapping(g_upnpTunnelPort); g_upnpTunnelPort = 0; }
 }

@@ -15,11 +15,13 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <sstream>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "urlmon.lib")
 
 static HttpServer* g_server = nullptr;
 static std::atomic<bool> g_quit{false};
+static uint16_t g_upnpMappedPort = 0;
 
 static void signalHandler(int) {
     g_quit = true;
@@ -70,10 +72,39 @@ static void showQRCode(const std::string& url) {
         ShellExecuteA(nullptr, "open", qrPath.c_str(), nullptr, nullptr, SW_SHOW);
 }
 
+static bool isPrivateOrSpecialIPv4(const std::string& ip) {
+    std::istringstream ss(ip);
+    std::string part;
+    int octets[4] = {};
+    for (int i = 0; i < 4; i++) {
+        if (!std::getline(ss, part, '.')) return true;
+        try {
+            octets[i] = std::stoi(part);
+        } catch (...) {
+            return true;
+        }
+        if (octets[i] < 0 || octets[i] > 255) return true;
+    }
+    if (std::getline(ss, part, '.')) return true;
+
+    return octets[0] == 10 ||
+           octets[0] == 127 ||
+           octets[0] == 0 ||
+           (octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127) ||
+           (octets[0] == 169 && octets[1] == 254) ||
+           (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
+           (octets[0] == 192 && octets[1] == 168);
+}
+
 static std::string discoverPublicUrl(uint16_t port, const std::string& localIp) {
-    std::string externalIp = upnpGetExternalIP();
-    if (!externalIp.empty() && upnpAddPortMapping(port, port, localIp, "ShareThisFolder"))
-        return "http://" + externalIp + ":" + std::to_string(port) + "/";
+    std::string upnpExternalIp = upnpGetExternalIP();
+    if (!upnpExternalIp.empty() && !isPrivateOrSpecialIPv4(upnpExternalIp)) {
+        UpnpMapping mapping = upnpMapTcpPort(port, port, localIp, "ShareThisFolder");
+        if (mapping.success && !isPrivateOrSpecialIPv4(mapping.externalIp)) {
+            g_upnpMappedPort = mapping.externalPort;
+            return "http://" + mapping.externalIp + ":" + std::to_string(mapping.externalPort) + "/";
+        }
+    }
 
     StunResult r;
     if (tunnelStart("www.baidu.com", 80, "stun.nextcloud.com", 3478, port, "0.0.0.0", r))
@@ -156,6 +187,7 @@ int main() {
     }
 
     tunnelStop();
+    if (g_upnpMappedPort != 0) upnpRemovePortMapping(g_upnpMappedPort);
     WSACleanup();
     return 0;
 }
