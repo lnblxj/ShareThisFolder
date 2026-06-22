@@ -25,5 +25,5 @@ if(MSVC)
 endif()
 
 if(WIN32)
-    target_link_libraries(ShareThisFolder PRIVATE ws2_32 urlmon)
+    target_link_libraries(ShareThisFolder PRIVATE ws2_32 urlmon user32 shell32 advapi32)
 endif()
