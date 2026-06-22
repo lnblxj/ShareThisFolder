@@ -1,75 +1,65 @@
 # ShareThisFolder
 
-A lightweight LAN file sharing tool for Windows. Share any folder to your phone or other devices via QR code scanning.
+ShareThisFolder is a lightweight Windows folder sharing tool that quickly shares the current folder with phones and other devices.
+
+## New Features
+
+- **UPnP port mapping** - when public access is requested, the app first tries to create a router UPnP port mapping.
+- **STUN tunnel fallback** - adds STUN public endpoint discovery and local forwarding for compatible NAT environments.
+- **Windows Explorer address-bar quick launch** - after enabling quick launch in Settings, type `stf` in the Windows Explorer address bar to share the current folder.
 
 ## Features
 
-- **One-click sharing** — run the executable and instantly share the current folder over LAN
-- **QR code scanning** — automatically generates a QR code image for quick phone access
-- **Bilingual UI** — auto-detects system language (Chinese / English)
-- **Zero dependencies** — single `.exe`, no installation needed
-- **Mobile-friendly** — clean web interface for browsing and downloading files
+- **One-click LAN sharing** - run the executable in the folder you want to share, and the folder can be accessed over the local network.
+- **Mobile-friendly browser page** - provides a clean mobile directory browser and file download page.
+- **Multilingual UI** - automatically detects the system language and supports multiple languages.
+- **Single executable** - the sharing host only needs to download and run the executable.
+- **Quick launch** - install the system-level `stf` command from the Settings menu.
+- **Public access** - supports intranet traversal as much as possible, including NAT3 network environments.
 
 ## Quick Start
 
 ### Download
 
-Grab the latest build from [Releases](https://github.com/lnblxj/ShareThisFolder/releases).
+Download the latest version from [Releases](https://github.com/lnblxj/ShareThisFolder/releases).
 
 ### Build from Source
 
-Requires Visual Studio 2022 with C++ desktop development workload.
+Requires Visual Studio 2022 with the C++ desktop development workload.
 
 ```bash
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-The executable will be at `build/Release/ShareThisFolder.exe`.
+The executable will be generated at `build/Release/ShareThisFolder.exe`.
 
-## Project Layout
+## Usage
 
-```text
-include/share_this_folder/
-  http/   Public HTTP file server interfaces
-  net/    Local network discovery, UPnP, and STUN tunnel interfaces
-  util/   Shared utility interfaces such as i18n
-src/
-  app/    Application entry point and console workflow
-  http/   HTTP file server implementation
-  net/    Network discovery, UPnP, and STUN tunnel implementation
-  util/   Shared utility implementation
-docs/     Design and protocol notes
-```
+### Share the Current Folder
 
-### Usage
+1. Put `ShareThisFolder.exe` into the folder you want to share.
+2. Double-click it, or run it from a terminal.
+3. Open the LAN address shown in the menu from your phone or another device.
+4. Press an address number to copy the corresponding URL.
+5. Press `s` to choose an address and show its QR code.
+6. Press `q` or `Ctrl+C` to stop sharing.
 
-1. Place `ShareThisFolder.exe` in the folder you want to share
-2. Double-click to run (or run from terminal)
-3. A QR code image will open automatically — scan it with your phone
-4. Browse and download files from your phone's browser
-5. Press `Ctrl+C` in the terminal to stop
+### Enable Public Access
 
-```
-  ShareThisFolder - LAN File Sharing
-  ------------------------------------------------
+Press `w` in the main menu. The app will try to open a NAT tunnel. If hole punching succeeds, a `WAN` address is added to the menu.
 
-  Sharing: D:\MyFiles
+Public access availability depends on the router, ISP, firewall, and NAT type. Enabling UPnP on the router is recommended to improve the success rate.
 
-  Or open in browser: http://192.168.1.100:8080/
+### Set Up Windows Explorer Quick Launch
 
-  Scan QR code with your phone:
+1. Press `e` to open Settings.
+2. Choose `Set quick launch`.
+3. Approve the Windows administrator permission prompt.
+4. The app copies itself to `C:\Program Files\ShareThisFolder\stf.exe` and adds that directory to the system `Path`.
+5. Open any folder in Windows Explorer, type `stf` in the address bar, and press Enter to share the current folder.
 
-  QR code image opened - scan with your phone
-
-  Press Ctrl+C to stop
-```
-
-## Requirements
-
-- Windows 10 / 11
-- Network connectivity (LAN) between your computer and phone
-- Internet connection (only needed for QR code generation on first launch)
+To remove it, choose `Remove quick launch` from the Settings menu.
 
 ## License
 
